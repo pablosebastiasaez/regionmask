@@ -14,7 +14,6 @@ from .utils import (
 
 _MASK_DOCSTRING_TEMPLATE = """\
 create a {nd} {dtype} mask of a set of regions for the given lat/ lon grid
-
 Parameters
 ----------
 {gp_doc}lon_or_obj : object or array_like
@@ -42,11 +41,9 @@ wrap_lon : bool | 180 | 360, optional
     wrapped. If wrap_lon is False, nothing is done. If wrap_lon is True,
     longitude data is wrapped to 360 if its minimum is smaller
     than 0 and wrapped to 180 if its maximum is larger than 180.
-
 Returns
 -------
 mask_{nd} : {dtype} xarray.DataArray
-
 References
 ----------
 See https://regionmask.readthedocs.io/en/stable/notebooks/method.html
@@ -122,8 +119,9 @@ def _mask(
     lon_orig = lon.copy()
     if wrap_lon:
         lon = _wrapAngle(lon, wrap_lon)
-    if method not in (None, "rasterize", "shapely", "legacy", "weights_default","weights_rot_pole"):
-        msg = "Method must be None or one of 'rasterize', 'shapely', or 'legacy'. Or newest 'weights_default' or 'weights_rot_pole' by Pablo"
+
+    if method not in (None, "rasterize", "shapely"):
+        msg = "Method must be None or one of 'rasterize' and 'shapely'."
         raise ValueError(msg)
 
     if method is None:
@@ -142,12 +140,7 @@ def _mask(
         mask = _mask_rasterize_split(lon, lat, outlines, numbers=numbers)
     elif method == "shapely":
         mask = _mask_shapely(lon, lat, outlines, numbers=numbers)
-    # Edited by Pablo
-    elif method == "weights_default":
-        mask = _Default(lon, lat, outlines, numbers=numbers)
-    elif method == "weights_rot_pole":
-        mask = _Rotated_Pole(lon, lat, outlines, numbers=numbers) 
-        
+
     # we need to treat the points at -180°E/0°E and -90°N
     mask = _mask_edgepoints_shapely(mask, lon, lat, outlines, numbers)
 
@@ -385,65 +378,6 @@ def _mask_shapely(lon, lat, polygons, numbers, fill=np.NaN):
 
     return out.reshape(shape)
 
-############################# EDITED BY PABLO: DOWN ###############################
-
-def _Rotated_Pole(lon, lat, polygons, numbers, fill=np.NaN):
-    import geopandas as gpd
-    projection=input("Enter rotated pole projection in the form: +proj=ob_tran +o_proj=longlat +o_lon_p=... +o_lat_p=... +lon_0=... +to_meter=... +ellps=...: ")
-    lon, lat, numbers = _parse_input(lon, lat, polygons, fill, numbers)
-    crs="EPSG:4326"
-    shapefile_region =gpd.GeoDataFrame(polygons,columns=['geometry'],crs=crs)
-    proj_shp_region=shapefile_region.to_crs(projection)
-    return _mask_weights(lon, lat, proj_shp_region.geometry.tolist()[0])
-
-def _Default(lon, lat, polygons, numbers, fill=np.NaN):
-    lon, lat, numbers = _parse_input(lon, lat, polygons, fill, numbers)
-    shapefile_region=polygons[0]
-    return _mask_weights(lon, lat, shapefile_region)
-
-def _mask_weights(lon, lat,shapefile_region):
-    from shapely.geometry import Polygon
-
-    #Creating grid as polygons to intersect with shapefile
-    grid_cells = []
-    for i in range(len(lon)-2):
-        for j in range(len(lat)-2):
-        # bounds
-            cell_size_x=np.float64(lon[i+1])-np.float64(lon[i])
-            cell_size_y=np.float64(lat[j+1])-np.float64(lat[j])
-
-            x0=np.float64(lon[i])+cell_size_x/2.
-            y0=np.float64(lat[j])+cell_size_y/2.
-            
-            cell_size_x=np.float64(lon[i+2])-np.float64(lon[i+1])
-            cell_size_y=np.float64(lat[j+2])-np.float64(lat[j+1])
-            
-            x1 = np.float64(lon[i+1])+cell_size_x/2.
-            y1 = np.float64(lat[j+1])+cell_size_y/2.
-            grid_cells.append(Polygon([[x0, y0],[x1,y0],[x1,y1], [x0, y1],[x0,y0]]))
-
-    #selecting the geometry from the given shapefile
-    polygons_to = shapefile_region#.geometry.iloc[0]
-
-    #Calculating the areal weights as intersection between shapefile and grided polygon
-    areas=[]
-    for r in grid_cells:
-        intersect = polygons_to.intersection(r)
-        areas.append(intersect.area)
-    poly_area=areas
-
-    #Truning result in 2D array with right dimensions
-    
-    pol=np.reshape(poly_area, (len(lon)-2, len(lat)-2))
-
-    poly=np.zeros((len(lon), len(lat)))
-    poly[1:-1,1:-1]=pol
-    
-    poly_pol=np.nan_to_num(poly)
-
-    out=poly_pol.T/(sum(sum(poly_pol.T)))
-    return out
-############################# EDITED BY PABLO: UP ###############################
 
 def _parse_input(lon, lat, coords, fill, numbers):
 
@@ -522,9 +456,7 @@ def _mask_rasterize_split(lon, lat, polygons, numbers, fill=np.NaN, **kwargs):
 
 def _mask_rasterize(lon, lat, polygons, numbers, fill=np.NaN, **kwargs):
     """Rasterize a list of (geometry, fill_value) tuples onto the given coordinates.
-
     This only works for 1D lat and lon arrays.
-
     for internal use: does not check valitity of input
     """
     # subtract a tiny offset: https://github.com/mapbox/rasterio/issues/1844
@@ -536,9 +468,7 @@ def _mask_rasterize(lon, lat, polygons, numbers, fill=np.NaN, **kwargs):
 
 def _mask_rasterize_no_offset(lon, lat, polygons, numbers, fill=np.NaN, **kwargs):
     """Rasterize a list of (geometry, fill_value) tuples onto the given coordinates.
-
     This only works for 1D lat and lon arrays.
-
     for internal use: does not check valitity of input
     """
     # TODO: use only this function once https://github.com/mapbox/rasterio/issues/1844
